@@ -248,6 +248,284 @@
             
               
                 
+                <a class="post-title-link" href="/2016/09/19/redis-queue/" itemprop="url">
+                  基于redis+mysql+php的简单队列实现
+                </a>
+              
+            
+          </h1>
+        
+
+        <div class="post-meta">
+          <span class="post-time">
+            <span class="post-meta-item-icon">
+              <i class="fa fa-calendar-o"></i>
+            </span>
+            <span class="post-meta-item-text">发表于</span>
+            <time itemprop="dateCreated" datetime="2016-09-19T15:10:54+08:00" content="2016-09-19">
+              2016-09-19
+            </time>
+          </span>
+
+          
+
+          
+            
+              <span class="post-comments-count">
+                &nbsp; | &nbsp;
+                <a href="/2016/09/19/redis-queue/#comments" itemprop="discussionUrl">
+                  <span class="post-comments-count ds-thread-count" data-thread-key="2016/09/19/redis-queue/" itemprop="commentsCount"></span>
+                </a>
+              </span>
+            
+          
+
+          
+
+          
+          
+             <span id="/2016/09/19/redis-queue/" class="leancloud_visitors" data-flag-title="基于redis+mysql+php的简单队列实现">
+               &nbsp; | &nbsp;
+               <span class="post-meta-item-icon">
+                 <i class="fa fa-eye"></i>
+               </span>
+               <span class="post-meta-item-text">阅读次数 </span>
+               <span class="leancloud-visitors-count"></span>
+              </span>
+          
+
+          
+        </div>
+      </header>
+    
+
+
+    <div class="post-body" itemprop="articleBody">
+
+      
+      
+
+      
+        
+          
+            <h5 id="业务层邮件入队"><a href="#业务层邮件入队" class="headerlink" title="业务层邮件入队"></a>业务层邮件入队</h5><p>入队列使用redis的lpush指令，先将邮件详情写入mysql存储，再将邮件id push到队列中</p>
+<pre><code>function sendSysMail($userId, $type, $content)
+{
+    $sysSmsLogModel = M('SysEmailLog');
+    $data = array(
+        'user_id' => $userId,
+        'content' => $content,
+        //'type' => $type,
+        'add_time' => time(),
+        'date_time' => date('Y-m-d H:i:s', time()),
+        'add_ip' => get_client_ip(),
+    );
+    if($sysSmsLogModel->create($data))
+    {
+        $emailId = $sysSmsLogModel->add();
+        //添加邮件队列
+        $redis = new Redis();
+        $redis->connect(C('REDIS_HOST'), C('REDIS_PORT'));
+        $redis->lPush('mailQueue', $emailId);
+        return TRUE;
+    }
+    else
+    {
+        return FALSE;
+    }
+}
+</code></pre>
+
+
+<h4 id="后台队列监听"><a href="#后台队列监听" class="headerlink" title="后台队列监听"></a>后台队列监听</h4><p>后台执行一个PHP守护进程，监听队列，一旦队列有数据，就从mysql中取对应的邮件详细情况进行发送。<br>测试过程中发生了件奇怪的事情，后台进程开启后开始执行的好好的，并没有什么异常，但跑了一晚上，第二天再来看时便不正常了。<br>看了下redis的数据，都正常的出入队列了，但是邮件并未发送，日志中也没有发送失败的记录。<br>一番折腾，发现是mysql连接这块存在问题，mysql默认的连接超时时间是28800秒，即8小时，超过8小时，mysql连接就断开了，过了一晚上,mysql自然就go away了。<br>于是在没有队列没有数据的时候执行select 1来延长mysql连接的超时时间点，select 1执行异常时重新建立一个mysql的连接替换之前的连接，以此来保持mysql的连接始终可用。</p>
+<pre><code>
+//mailQueue.php
+require 'PHPMailer/PHPMailerAutoload.php';
+$config = include('config.php');
+function send($to, $title, $content)
+{
+    global $config;
+    $mailer = new PHPMailer();
+    $mailer->IsSMTP();    // 启用SMTP
+    $mailer->Host = $config['MAIL_HOST'];    //smtp服务器的名称（这里以QQ邮箱为例）
+    $mailer->SMTPAuth = $config['MAIL_SMTPAUTH'];    //启用smtp认证
+    $mailer->Username = $config['MAIL_USERNAME'];    //你的邮箱名
+    $mailer->Password = $config['MAIL_PASSWORD'];    //邮箱密码
+    $mailer->From = $config['MAIL_FROM'];    //发件人地址（也就是你的邮箱地址）
+    $mailer->FromName = $config['MAIL_FROMNAME'];    //发件人姓名
+    $mailer->AddAddress($to);
+    $mailer->WordWrap = 50;    //设置每行字符长度
+    $mailer->IsHTML($config['MAIL_ISHTML']);    // 是否HTML格式邮件
+    $mailer->CharSet = $config['MAIL_CHARSET'];    //设置邮件编码
+    $mailer->Subject = $title;    //邮件主题
+    $mailer->Body = $content;    //邮件内容
+    $mailer->AltBody = $content; //邮件正文不支持HTML的备用显示
+    $result = $mail->Send();
+    return $result;
+}
+
+$redis = new Redis();
+$redis->connect($config['REDIS_HOST'], $config['REDIS_PORT']);
+$pdo = new PDO($config['DSN'], $config['DB_USER'], $config['DB_PWD'], array(
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+
+while (true) {
+    $task = $redis->brPop('mailQueue', 10);
+    if ($task) 
+    {
+        $emailId = $task[1];
+        $sql = "select a.*, b.email 
+                    from sys_email_log as a, user_main as b 
+                    where a.user_id = b.user_id 
+                    and a.email_id = {$emailId}";
+        $res = $pdo->query($sql);
+        foreach ($res as $row) 
+        {
+            $to = $row['email'];
+            $title = '邮件提醒';
+            $content = $row['content'];    
+            $result = send($to, $title, $content);
+            if ($result) 
+            {
+                echo date("Y-m-d H:i:s", time()) . ": " . $emailId . '发送成功' . "\n";
+            } 
+            else 
+            {
+                echo date("Y-m-d H:i:s", time()) . ": " . $emailId . '发送失败' . "\n";
+            }        
+        }
+    }
+    else
+    {
+        //mysql保持连接
+        try
+        {
+            $pdo->query("SELECT 1");
+            //echo date("Y-m-d H:i:s", time()) . ': 保持连接' . "\n";
+        }
+        catch (PDOException $e)
+        {
+            $pdo = new PDO($config['DSN'], $config['DB_USER'], $config['DB_PWD'], array(
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION));
+            echo date("Y-m-d H:i:s", time()) . ': mysql重连' . "\n";
+        }
+    }
+}
+</code></pre>
+
+<h4 id="队列监听程序的守护进程"><a href="#队列监听程序的守护进程" class="headerlink" title="队列监听程序的守护进程"></a>队列监听程序的守护进程</h4><pre><code>
+#!/bin/bash
+
+#开启
+function start()
+{
+    #先检测程序是否已经开启
+    pid=`ps -ef | grep "php -f mailQueue.php" | grep -v grep | awk '{print $2}'`
+
+    if [ "$pid" == "" ]
+    then
+        php -f mailQueue.php >> mailLog &
+        echo "程序启动成功"
+    else
+        echo "程序已经开启过"
+    fi
+
+}
+
+#关闭
+function stop()
+{
+    pid=`ps -ef | grep "php -f mailQueue.php" | grep -v grep | awk '{print $2}'`
+
+    if [ "$pid" == "" ]
+    then
+        echo "程序未开启"
+    else
+        kill -9 $pid
+        echo "程序关闭成功"
+    fi
+}
+
+#查看开启状态
+function status()
+{
+    pid=`ps -ef | grep "php -f mailQueue.php" | grep -v grep | awk '{print $2}'`
+
+    if [ "$pid" == "" ]
+    then
+        echo "程序未开启"
+    else
+        echo "程序运行中,pid: $pid"
+    fi
+}
+
+
+#主程序
+case "$1" in
+"start")
+    start
+    ;;
+
+"stop" )
+    stop
+    ;;
+
+* )
+    echo "参数错误! Usage: mailQueue [start|stop|status]"
+    ;;
+esac
+</code></pre>
+
+<p>这只是一个很简单的用于测试的程序，要想稳定运行还有很多需要处理的地方<br>1.邮件发送失败后在mysql表记录失败状态并记录失败次数，设置一个最大失败次数，小于最大失败次数则重新入队列，再次发送<br>2.对后台队列检测程序的监视，当后台检测程序意外崩溃时重新启动程序<br>3.对redis数据丢失的处理：待处理<br>后续再进行更新。。。</p>
+
+          
+        
+      
+    </div>
+
+    <div>
+      
+    </div>
+
+    <div>
+      
+    </div>
+
+    <footer class="post-footer">
+      
+
+      
+
+      
+      
+        <div class="post-eof"></div>
+      
+    </footer>
+  </article>
+
+
+    
+      
+
+  
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal " itemscope itemtype="http://schema.org/Article">
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">
+            
+            
+              
+                
                 <a class="post-title-link" href="/2016/09/06/deploy-gitpage/" itemprop="url">
                   hexo + gitpage 搭建个人博客
                 </a>
@@ -380,7 +658,7 @@
         <nav class="site-state motion-element">
           <div class="site-state-item site-state-posts">
             <a href="/archives">
-              <span class="site-state-item-count">1</span>
+              <span class="site-state-item-count">2</span>
               <span class="site-state-item-name">日志</span>
             </a>
           </div>
@@ -390,7 +668,7 @@
           
             <div class="site-state-item site-state-tags">
               <a href="/tags">
-                <span class="site-state-item-count">2</span>
+                <span class="site-state-item-count">3</span>
                 <span class="site-state-item-name">标签</span>
               </a>
             </div>
