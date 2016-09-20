@@ -84,31 +84,16 @@
 
 
 
-<meta name="description" content="业务层邮件入队入队列使用redis的lpush指令，先将邮件详情写入mysql存储，再将邮件id push到队列中
-function sendSysMail($userId, $type, $content)
-{
-    $sysSmsLogModel = M(&apos;SysEmailLog&apos;);
-    $data = array(
-        &apos;user_id&apos; =&amp;gt; $userId,">
+<meta name="description" content="redis的list是有序的列表，加上其出队入队函数，很简单的就能实现一个消息队列">
 <meta property="og:type" content="article">
 <meta property="og:title" content="基于redis+mysql+php的简单队列实现">
 <meta property="og:url" content="http://www.chankay.xyz/2016/09/19/redis-queue/index.html">
 <meta property="og:site_name" content="chankay">
-<meta property="og:description" content="业务层邮件入队入队列使用redis的lpush指令，先将邮件详情写入mysql存储，再将邮件id push到队列中
-function sendSysMail($userId, $type, $content)
-{
-    $sysSmsLogModel = M(&apos;SysEmailLog&apos;);
-    $data = array(
-        &apos;user_id&apos; =&amp;gt; $userId,">
-<meta property="og:updated_time" content="2016-09-19T07:14:59.000Z">
+<meta property="og:description" content="redis的list是有序的列表，加上其出队入队函数，很简单的就能实现一个消息队列">
+<meta property="og:updated_time" content="2016-09-20T01:29:47.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="基于redis+mysql+php的简单队列实现">
-<meta name="twitter:description" content="业务层邮件入队入队列使用redis的lpush指令，先将邮件详情写入mysql存储，再将邮件id push到队列中
-function sendSysMail($userId, $type, $content)
-{
-    $sysSmsLogModel = M(&apos;SysEmailLog&apos;);
-    $data = array(
-        &apos;user_id&apos; =&amp;gt; $userId,">
+<meta name="twitter:description" content="redis的list是有序的列表，加上其出队入队函数，很简单的就能实现一个消息队列">
 
 
 
@@ -317,7 +302,8 @@ function sendSysMail($userId, $type, $content)
       
 
       
-        <h5 id="业务层邮件入队"><a href="#业务层邮件入队" class="headerlink" title="业务层邮件入队"></a>业务层邮件入队</h5><p>入队列使用redis的lpush指令，先将邮件详情写入mysql存储，再将邮件id push到队列中</p>
+        <p>redis的list是有序的列表，加上其出队入队函数，很简单的就能实现一个消息队列<br><a id="more"></a></p>
+<h5 id="业务层邮件入队"><a href="#业务层邮件入队" class="headerlink" title="业务层邮件入队"></a>业务层邮件入队</h5><p>入队列使用redis的lpush指令，先将邮件详情写入mysql存储，再将邮件id push到队列中</p>
 <pre><code>function sendSysMail($userId, $type, $content)
 {
     $sysSmsLogModel = M('SysEmailLog');
